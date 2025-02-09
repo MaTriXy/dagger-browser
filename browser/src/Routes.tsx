@@ -10,6 +10,8 @@ export class Paths {
   static GraphNode = "/:component/node/:node"
   static GraphClosure = "/:component/closure/:key"
   static SubComponent = "/:component/:subcomponent"
+  static SearchNode = "/search/:nodeName"
+  static Tree = "/:component/tree/:key"
 }
 
 export class Routes {
@@ -35,6 +37,12 @@ export class Routes {
 
   static SubComponent = (component: string, subcomponent: string): string => {
     return `/${encodeURIComponent(component)}/${encodeURIComponent(subcomponent)}`;
+  }
+  static SearchNode = (nodeName: string): string => {
+    return `/search/${encodeURIComponent(nodeName)}`;
+  }
+  static Tree = (component: string, key: string): string => {
+    return `/${encodeURIComponent(component)}/tree/${encodeURIComponent(key)}`;
   }
 }
 

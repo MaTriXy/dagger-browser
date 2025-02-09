@@ -1,6 +1,7 @@
 import GraphReducer from "./GraphReducer";
 import ComponentSet, { Node, Component, Module, Scope, Weight } from "./Graph";
 import axios from "axios";
+import pako from "pako";
 import { ClassInfo } from "./ClassSize";
 import Config from "./Config";
 
@@ -16,6 +17,7 @@ const SUBCOMPONENT_SMALL_THRESHOLD = 10;
  */
 export default class GraphManager {
   manifestUrl?: string;
+  gzippedManifestUrl?: string;
   classInfoUrl?: string;
 
   componentSet: ComponentSet = { components: [] };
@@ -24,12 +26,13 @@ export default class GraphManager {
   // Caches to speed up graph-based operations
   private nodeMap: { [componentName: string]: { [key: string]: Node } } = {};
   private componentMap: { [componentName: string]: Component } = {};
+  private provisionsToExposingComponentsMap: { [key: string]: Array<string> } = {};
   private subcomponentWeights: { [key: string]: Weight }  = {};
   private callsitesMap: {
     [componentName: string]: { [key: string]: Node[] };
   } = {};
 
-  async loadUrl(manifestUrl: string): Promise<boolean> {
+  async loadUrl(manifestUrl: string, gzippedManifestUrl: string): Promise<boolean> {
     let classInfoUrl = manifestUrl.substring(0, manifestUrl.lastIndexOf("\/") + 1) + "ClassInfo.json";    
 
     try {
@@ -39,14 +42,20 @@ export default class GraphManager {
       // classInfo is optional
     }
     try {
-      let manifestResponse = await axios.get(manifestUrl)      
-      this.componentSet = manifestResponse.data as ComponentSet;
+      try {
+        let manifestResponse = await axios.get(manifestUrl)
+        this.componentSet = manifestResponse.data as ComponentSet;
+      } catch {
+        let manifestResponse = await axios.get(gzippedManifestUrl, {responseType: 'arraybuffer', 'decompress': true })
+        this.componentSet = JSON.parse(pako.inflate(manifestResponse.data, { to: 'string' })) as ComponentSet;
+      }
       this.populateCaches();
     } catch {
       return false;
     }
 
     this.manifestUrl = manifestUrl;
+    this.gzippedManifestUrl = gzippedManifestUrl;
     this.classInfoUrl = classInfoUrl;
     return true;
   }
@@ -105,10 +114,6 @@ export default class GraphManager {
   getComponent(componentName: string): Component {
     const component = this.componentMap[componentName];
 
-    if (!component) {
-      throw Error(`Could not find ${componentName} component`);
-    }
-
     return component;
   }
 
@@ -156,6 +161,13 @@ export default class GraphManager {
         kind: referenceNode.kind
       };
     });
+  }
+
+  /**
+   * Returns components that can provide a given dependency
+   */
+  getDependencyProviders(key: string): string[] {
+    return this.provisionsToExposingComponentsMap[key]
   }
 
   getSubcomponentWeight(subcomponent: string): Weight {
@@ -233,6 +245,19 @@ export default class GraphManager {
       component.nodes = component.nodes.filter(node => !this.shouldSkipNode(node));
 
       for (const node of component.nodes) {
+
+        if (node.key == component.name) {
+          // The component itself is a node with its own usable dependencies
+          for (const dependency of node.dependencies) {
+            var arr = this.provisionsToExposingComponentsMap[dependency.key]
+            if (!arr) {
+              arr = Array<string>()
+              this.provisionsToExposingComponentsMap[dependency.key] = arr
+            }
+            arr.push(component.name)
+          }
+        }
+
         this.nodeMap[component.name][node.key] = node;
         this.nodeMap[ALL_COMPONENTS][node.key] = node;
 
